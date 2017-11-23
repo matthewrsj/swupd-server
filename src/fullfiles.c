@@ -353,7 +353,9 @@ void create_fullfiles(struct manifest *manifest)
 	free(conf);
 
 	/* De-duplicate the list of fullfiles needing created to avoid races */
+	print_files(manifest->files);
 	deduped_file_list = get_deduplicated_fullfile_list(manifest);
+	print_files(deduped_file_list);
 
 	/* Submit tasks to create full files */
 	submit_fullfile_tasks(deduped_file_list);

@@ -413,6 +413,8 @@ int main(int argc, char **argv)
 		}
 		LOG(NULL, "", "Core component has changes (%d new, %d deleted, %d ghosted), writing out new manifest", newfiles, old_deleted, old_ghosted);
 		printf("Core component has changes (%d new, %d deleted, %d ghosted), writing out new manifest\n", newfiles, old_deleted, old_ghosted);
+		create_fullfiles(new_core);
+		determine_dl_info(new_core->files);
 		if (write_manifest(new_core) != 0) {
 			LOG(NULL, "", "Core component manifest write failed");
 			printf("Core component manifest write failed\n");
@@ -532,6 +534,8 @@ int main(int argc, char **argv)
 			if (newfiles > 0 || old_deleted > 0 || old_ghosted > 0 || changed_includes(oldm, newm)) {
 				LOG(NULL, "", "%s component has changes (%d new, %d deleted, %d ghosted), writing out new manifest", group, newfiles, old_deleted, old_ghosted);
 				printf("%s component has changes (%d new, %d deleted, %d ghosted), writing out new manifest\n", group, newfiles, old_deleted, old_ghosted);
+				create_fullfiles(newm);
+				determine_dl_info(newm->files);
 				if (write_manifest(newm) != 0) {
 					LOG(NULL, "", "%s component manifest write failed", group);
 					printf("%s component manifest write failed\n", group);
@@ -553,6 +557,8 @@ int main(int argc, char **argv)
 	/* Phase 4 : manifest completion */
 	/* Step 7: Create the meta-manifest */
 	sort_manifest_by_version(new_MoM);
+	create_fullfiles(new_MoM);
+	determine_dl_info(new_MoM->files);
 	if (write_manifest(new_MoM) != 0) {
 		LOG(NULL, "Failed to write new MoM", "");
 		printf("Failed to write new MoM\n");
@@ -569,6 +575,8 @@ int main(int argc, char **argv)
 
 	sort_manifest_by_version(new_full);
 	prune_manifest(new_full);
+	create_fullfiles(new_full);
+	determine_dl_info(new_full->files);
 	if (write_manifest(new_full) != 0) {
 		goto exit;
 	}

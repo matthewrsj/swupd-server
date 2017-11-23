@@ -324,3 +324,103 @@ out:
 	free(src);
 	return ret;
 }
+
+/* Assign the correct hash to file->download_hash */
+static int dl_hash(struct file *file, char *path)
+{
+	struct file *dl_file;
+	int ret = 0;
+
+	if (file->is_ghosted || file->is_deleted || file->is_rename) {
+		hash_set_zeros(file->download_hash);
+		return ret;
+	}
+
+	dl_file = calloc(1, sizeof(struct file));
+	dl_file->filename = path;
+	populate_file_struct(dl_file, path);
+	dl_file->use_xattrs = false;
+	ret = compute_hash(dl_file, path, true);
+	if (ret == 0) {
+		hash_assign(dl_file->download_hash, file->download_hash);
+	}
+
+	free(dl_file);
+	return ret;
+}
+
+static int dl_size(struct file *file, char *path)
+{
+	struct stat st;
+
+	if (file->is_ghosted || file->is_deleted || file->is_rename) {
+		return 0;
+	}
+
+	if (stat(path, &st) != 0) {
+		return -1;
+	}
+
+	file->download_size = st.st_size;
+	return 0;
+}
+
+int set_dl_info(struct file *file, char *path)
+{
+	if (dl_hash(file, path) != 0) {
+		printf("Hash computation failed on %s (%s)\n", file->filename, path);
+		return -1;
+	}
+
+	if (dl_size(file, path) != 0) {
+		printf("Size computation failed on %s (%s)\n", file->filename, path);
+		return -1;
+	}
+
+	return 0;
+}
+
+/* determine hashes of files in their final form for download (tarred and
+ * compressed) to add to the manifests */
+void determine_dl_info(GList *files)
+{
+	GList *item;
+	struct file *file;
+	char *tarname, *outdir;
+
+	outdir = config_output_dir();
+	item = g_list_first(files);
+	while (item) {
+		file = item->data;
+		item = g_list_next(item);
+		string_or_die(&tarname, "%s/%i/files/%s.tar", outdir, file->last_change, file->hash);
+		if (set_dl_info(file, tarname) != 0) {
+			assert(0);
+		}
+
+		free(tarname);
+	}
+}
+
+static void print_files(GList *files) {
+	GList *item;
+	struct file *file;
+
+	item = g_list_first(files);
+	printf("**********************************************\n");
+	while (item) {
+		file = item->data;
+		item = g_list_next(item);
+		printf("----\n");
+		printf("file->filename:    %s\n", file->filename);
+		printf("file->last_change: %d\n", file->last_change);
+		printf("file->is_rename:   %d\n", file->is_rename);
+		printf("file->is_deleted:  %d\n", file->is_deleted);
+		printf("file->is_ghosted:  %d\n", file->is_ghosted);
+		if (file->rename_peer) {
+			printf("file->rename_peer: %s\n", file->rename_peer->filename);
+		}
+		printf("----\n");
+	}
+	printf("**********************************************\n");
+}

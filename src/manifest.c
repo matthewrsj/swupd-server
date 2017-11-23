@@ -109,6 +109,99 @@ struct manifest *alloc_manifest(int version, char *component, GList *actions)
 	return manifest;
 }
 
+static void _read_flag0(char flag, struct file *file)
+{
+	switch (flag) {
+	case 'F': /* file */
+		file->is_file = 1;
+		break;
+	case 'D': /* directory */
+		file->is_dir = 1;
+		break;
+	case 'L': /* link */
+		file->is_link = 1;
+		break;
+	case 'M': /* manifest */
+		file->is_manifest = 1;
+		break;
+	case 'P': /* pack */
+		file->is_pack = 1;
+		break;
+	case '.': /* not specified, may be deleted */
+		break;
+	default: /* unknown file type */
+		assert(0);
+	}
+}
+
+static void _read_flag1(char flag, struct file *file) {
+	switch (flag) {
+	case 'd': /* deleted */
+		file->is_deleted = 1;
+		break;
+	case 'g': /* ghosted */
+		file->is_ghosted = 1;
+		break;
+	case '.': /* not specified */
+		break;
+	default: /* unknown deleted status */
+		assert(0);
+	}
+}
+
+static void _read_flag2(char flag, struct file *file) {
+	switch (flag) {
+	case 'C': /* configuration file */
+		file->is_config = 1;
+		break;
+	case 's': /* state file */
+		file->is_state = 1;
+		break;
+	case 'b': /* boot file */
+		file->is_boot = 1;
+		break;
+	case '.': /* no modifiers */
+		break;
+	default: /* unknown modifier status */
+		assert(0);
+	}
+}
+
+static void _read_flag3(char flag, struct file *file) {
+	switch (flag) {
+	case 'r': /* rename */
+		file->is_rename = 1;
+		break;
+	case '.': /* not a rename */
+		break;
+	default:
+		; /* flag 3: ignore unknown letters */
+	}
+}
+
+static void read_flags(char *flag_string, struct file *file)
+{
+	/* F, D, L, M, P */
+	_read_flag0(flag_string[0], file);
+	/* d, g */
+	_read_flag1(flag_string[1], file);
+	/* C, s, b */
+	_read_flag2(flag_string[2], file);
+	/* r */
+	_read_flag3(flag_string[3], file);
+}
+
+static char *trim_and_advance(char *cur, char *next)
+{
+	next = strchr(cur, '\t');
+	if (next) {
+		*next = 0;
+		/* point end to next field */
+		next++;
+	}
+	return next;
+}
+
 struct manifest *manifest_from_file(int version, char *component)
 {
 	FILE *infile;
@@ -215,97 +308,92 @@ struct manifest *manifest_from_file(int version, char *component)
 			break;
 		}
 
+		/* allocate file to be constructed from manifest line */
 		file = calloc(1, sizeof(struct file));
 		if (file == NULL) {
 			assert(0);
 		}
+
+		/* READ MANIFEST FIELDS */
+
+		/*
+		 * FIELD 1
+		 * read flags from manifest
+		 */
 		c = line;
+		/* find tab in line for hash */
+		c2 = trim_and_advance(c, c2);
+		/* read flags */
+		read_flags(c, file);
 
-		c2 = strchr(c, '\t');
-		if (c2) {
-			*c2 = 0;
-			c2++;
-		}
-
-		if (c[0] == 'F') {
-			file->is_file = 1;
-		} else if (c[0] == 'D') {
-			file->is_dir = 1;
-		} else if (c[0] == 'L') {
-			file->is_link = 1;
-		} else if (c[0] == 'M') {
-			LOG(NULL, "Found a manifest!", "%s", c);
-			file->is_manifest = 1;
-		} else if (c[0] != '.') {
-			assert(0); /* unknown file type */
-		}
-
-		switch (c[1]) {
-		case 'd':
-			/* file is deleted */
-			file->is_deleted = 1;
-			break;
-		case 'g':
-			/* file is ghosted */
-			file->is_ghosted = 1;
-			break;
-		case '.':
-			/* no flag at this index */
-			break;
-		default:
-			/* unknown deleted status */
-			LOG(NULL, "Invalid flag at index 1", "%s", c[1]);
-			assert(0);
-		}
-
-		if (c[2] == 'C') {
-			file->is_config = 1;
-		} else if (c[2] == 's') {
-			file->is_state = 1;
-		} else if (c[2] == 'b') {
-			file->is_boot = 1;
-		} else if (c[2] != '.') {
-			assert(0); /* unknown modifier status */
-		}
-
-		if (c[3] == 'r') {
-			file->is_rename = 1;
-		} else if (c[3] != '.') {
-			; /* field 4: ignore unknown letters */
-		}
-
+		/*
+		 * FIELD 2
+		 * read hash
+		 */
 		c = c2;
 		if (!c) {
 			free(file);
 			continue;
 		}
-		c2 = strchr(c, '\t');
-		if (c2) {
-			*c2 = 0;
-			c2++;
-		}
-
+		/* point c2 to version */
+		c2 = trim_and_advance(c, c2);
+		/* c now points to the file hash, assign to file->hash */
 		hash_assign(c, file->hash);
 
+		/*
+		 * FIELD 3
+		 * download hash
+		 */
 		c = c2;
 		if (!c) {
 			free(file);
 			continue;
 		}
-		c2 = strchr(c, '\t');
-		if (c2) {
-			*c2 = 0;
-			c2++;
-		}
+		c2 = trim_and_advance(c, c2);
+		hash_assign(c, file->download_hash);
 
+		/*
+		 * FIELD 4
+		 * download size
+		 */
+		c = c2;
+		if (!c) {
+			free(file);
+			continue;
+		}
+		c2 = trim_and_advance(c, c2);
+		/* TODO: Confirm 10 is large enough */
+		file->download_size = strtoull(c, NULL, 10);
+
+		/*
+		 * FIELD 5
+		 * read last_changed version
+		 */
+		c = c2;
+		if (!c) {
+			/* no version information in manifest */
+			free(file);
+			continue;
+		}
+		/* point c2 to filename */
+		c2 = trim_and_advance(c, c2);
+		/* c now points to version of last change, assign to file->last_change */
 		file->last_change = strtoull(c, NULL, 10);
 
+		/*
+		 * FIELD 6
+		 * file name
+		 */
 		c = c2;
 		if (!c) {
+			/* no filename */
 			free(file);
 			continue;
 		}
+		/* rest of line is filename */
 		file->filename = strdup(c);
+
+		/* END MANIFEST FIELDS */
 
 		if (file->is_manifest) {
 			nest_manifest_file(manifest, file);
@@ -442,12 +530,14 @@ int match_manifests(struct manifest *m1, struct manifest *m2)
 			file3->is_boot = file1->is_boot;
 			/* ghost deleted boot files */
 			file3->is_ghosted = file1->is_boot && file1->is_deleted;
+			file3->download_size = file1->download_size;
 
 			if (file3->is_ghosted || file1->is_deleted) {
 				/* if the new file is ghosted or the file was deleted, preserve
 				 * hash (all zeros if file1->is_deleted) and rename status */
 				file3->is_rename = file1->is_rename;
 				hash_assign(file1->hash, file3->hash);
+				hash_assign(file1->download_hash, file3->download_hash);
 			}
 
 			/* for deleted files last_change remains the same.
@@ -506,6 +596,7 @@ int match_manifests(struct manifest *m1, struct manifest *m2)
 		file3->is_config = file1->is_config;
 		file3->is_state = file1->is_state;
 		file3->is_boot = file1->is_boot;
+		file3->download_size = file1->download_size;
 
 		if (!file1->is_deleted) {
 			file3->last_change = m2->version;
@@ -513,6 +604,7 @@ int match_manifests(struct manifest *m1, struct manifest *m2)
 			file3->last_change = file1->last_change;
 			file3->is_rename = file1->is_rename;
 			hash_assign(file1->hash, file3->hash);
+			hash_assign(file1->download_hash, file3->download_hash);
 		}
 
 		file3->peer = file1;
@@ -670,6 +762,9 @@ char *file_type_to_string(struct file *file)
 	if (file->is_manifest) {
 		type[0] = 'M';
 	}
+	if (file->is_pack) {
+		type[0] = 'P';
+	}
 
 	if (file->is_deleted) {
 		type[1] = 'd';
@@ -728,6 +823,17 @@ static void compute_content_size(struct manifest *manifest)
 			}
 		}
 	}
+}
+
+static void write_manifest_entry(FILE *out, struct file *file)
+{
+	fprintf(out, "%s\t%s\t%s\t%i\t%i\t%s\n",
+		file_type_to_string(file),
+		file->hash,
+		file->download_hash,
+		file->download_size,
+		file->last_change,
+		file->filename);
 }
 
 /* Returns 0 == success, -1 == failure */
@@ -793,14 +899,14 @@ static int write_manifest_plain(struct manifest *manifest)
 		actions = g_list_next(actions);
 	}
 
+	/* add blank line to indicate next manifest section */
 	fprintf(out, "\n");
 
 	list = g_list_first(manifest->files);
 	while (list) {
 		file = list->data;
 		list = g_list_next(list);
-
-		fprintf(out, "%s\t%s\t%i\t%s\n", file_type_to_string(file), file->hash, file->last_change, file->filename);
+		write_manifest_entry(out, file);
 	}
 
 	list = g_list_first(manifest->manifests);
@@ -817,10 +923,6 @@ static int write_manifest_plain(struct manifest *manifest)
 		string_or_die(&submanifest_filename, "%s/%i/Manifest.%s", conf, file->last_change, file->filename);
 		populate_file_struct(file, submanifest_filename);
 
-		if (file->is_deleted) {
-			goto write_entry;
-		}
-
 		char *param1, *param2;
 
 		/* Untar the Manifest.BUNDLE.tar and calculate the hash on that,
@@ -828,6 +930,14 @@ static int write_manifest_plain(struct manifest *manifest)
 		 * the files. */
 		string_or_die(&param1, "%s", manifest_tempdir);
 		string_or_die(&param2, "%s.tar", submanifest_filename);
+		if (set_dl_info(file, param2) != 0) {
+			assert(0);
+		}
+
+		if (file->is_deleted) {
+			goto write_entry;
+		}
+
 		char *const tarcmd[] = { TAR_COMMAND, "-C", param1, TAR_PERM_ATTR_ARGS_STRLIST, "-xf", param2, NULL };
 		ret = system_argv(tarcmd);
 		free(param1);
@@ -839,7 +949,7 @@ static int write_manifest_plain(struct manifest *manifest)
 
 		string_or_die(&tempmanifest, "%s/Manifest.%s", manifest_tempdir, file->filename);
 		populate_file_struct(file, tempmanifest);
-		ret = compute_hash(file, tempmanifest);
+		ret = compute_hash(file, tempmanifest, false);
 		if (ret != 0) {
 			printf("Hash computation failed\n");
 			assert(0);
@@ -847,7 +957,7 @@ static int write_manifest_plain(struct manifest *manifest)
 		unlink(tempmanifest);
 		free(tempmanifest);
 	write_entry:
-		fprintf(out, "%s\t%s\t%i\t%s\n", file_type_to_string(file), file->hash, file->last_change, file->filename);
+		write_manifest_entry(out, file);
 		free(submanifest_filename);
 	}
 

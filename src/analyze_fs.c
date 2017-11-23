@@ -193,17 +193,24 @@ void populate_file_struct(struct file *file, char *filename)
  * return is -1 if there was an error. If the file does not exist,
  * a "0000000..." hash is returned as is our convention in the manifest
  * for deleted files.  Otherwise file->hash is set to a non-zero hash. */
-int compute_hash(struct file *file, char *filename)
+int compute_hash(struct file *file, char *filename, bool dlhash)
 {
 	int ret;
 	char key[SWUPD_HASH_LEN];
 	size_t key_len;
 	unsigned char *blob;
+	char *target;
 	FILE *fl;
 
 	if (file->is_deleted) {
 		hash_set_zeros(file->hash);
 		return 0;
+	}
+
+	if (dlhash) {
+		target = file->download_hash;
+	} else {
+		target = file->hash;
 	}
 
 	hash_set_zeros(key); /* Set to 64 '0' (not '\0') characters */
@@ -216,7 +223,7 @@ int compute_hash(struct file *file, char *filename)
 
 		if (ret >= 0) {
 			hmac_compute_key(filename, &file->stat, key, &key_len, file->use_xattrs);
-			hmac_sha256_for_string(file->hash,
+			hmac_sha256_for_string(target,
 					       (const unsigned char *)key,
 					       key_len,
 					       link);
@@ -229,7 +236,7 @@ int compute_hash(struct file *file, char *filename)
 
 	if (file->is_dir) {
 		hmac_compute_key(filename, &file->stat, key, &key_len, file->use_xattrs);
-		hmac_sha256_for_string(file->hash,
+		hmac_sha256_for_string(target,
 				       (const unsigned char *)key,
 				       key_len,
 				       SWUPD_HASH_DIRNAME); // Make independent of dirname
@@ -246,7 +253,7 @@ int compute_hash(struct file *file, char *filename)
 	assert(!(blob == MAP_FAILED && file->stat.st_size != 0));
 
 	hmac_compute_key(filename, &file->stat, key, &key_len, file->use_xattrs);
-	hmac_sha256_for_data(file->hash,
+	hmac_sha256_for_data(target,
 			     (const unsigned char *)key,
 			     key_len,
 			     blob,
@@ -273,7 +280,7 @@ static void get_hash(gpointer data, gpointer user_data)
 	file->use_xattrs = compute_hash_with_xattrs(filename);
 
 	populate_file_struct(file, filename);
-	ret = compute_hash(file, filename);
+	ret = compute_hash(file, filename, false);
 	if (ret != 0) {
 		printf("Hash computation failed\n");
 		assert(0);
@@ -614,6 +621,8 @@ void add_component_hashes_to_manifest(struct manifest *compm, struct manifest *f
 
 		if (ret == 0) {
 			hash_assign(file2->hash, file1->hash);
+			hash_assign(file2->download_hash, file1->download_hash);
+			file1->last_change = file2->last_change;
 			list1 = g_list_next(list1);
 			list2 = g_list_next(list2);
 		} else if (ret < 0) {

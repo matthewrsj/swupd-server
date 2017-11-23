@@ -107,8 +107,10 @@ struct update_stat {
 struct file {
 	char *filename;
 	char hash[SWUPD_HASH_LEN];
+	char download_hash[SWUPD_HASH_LEN];
 	bool use_xattrs;
 	int last_change;
+	int download_size;
 
 	struct update_stat stat;
 
@@ -122,6 +124,7 @@ struct file {
 	 * cleaning it up. This happens with boot files managed by a boot manager */
 	unsigned int is_ghosted : 1;
 	unsigned int is_manifest : 1;
+	unsigned int is_pack : 1;
 
 	/* and these are modifiers */
 	unsigned int is_config : 1;
@@ -220,7 +223,7 @@ extern void hash_assign(char *src, char *dest);
 extern bool hash_compare(char *hash1, char *hash2);
 extern void hash_set_zeros(char *hash);
 extern bool hash_is_zeros(char *hash);
-extern int compute_hash(struct file *file, char *filename) __attribute__((warn_unused_result));
+extern int compute_hash(struct file *file, char *filename, bool dlhash) __attribute__((warn_unused_result));
 
 extern void prepare_delta_dir(struct manifest *manifest);
 extern void create_fullfiles(struct manifest *manifest);
@@ -279,5 +282,8 @@ extern void move_fd(int oldfd, int newfd);
 extern int wait_process_terminate(pid_t pid);
 extern int num_threads(float scaling);
 extern bool file_is_debuginfo(const char *path);
+extern void determine_dl_info(GList *files);
+extern int set_dl_info(struct file *file, char *path);
+extern static void print_files(GList *files);
 
 #endif
